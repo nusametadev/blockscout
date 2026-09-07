@@ -21,23 +21,46 @@ services:
     environment:
       POSTGRES_PASSWORD: 'blockscout'
 
+  price-shim:
+    image: node:22-alpine
+    restart: unless-stopped
+    volumes:
+      - ../../price-shim:/app:ro
+    command: node /app/server.js
+    environment:
+      NATIVE_MARKETCAP_IDR: '500000000000'
+      NATIVE_SUPPLY: '1000000000'
+      NATIVE_RPC_URL: 'https://testnet.nagara.network'
+      MINAR_ADDRESS: '0x07cc38846B98e5C3Ebd8E9E184eF2bbb7CC8e8d8'
+      MINAR_PRICE_IDR: '10000'
+
   backend:
     depends_on:
       - db
       - redis-db
+      - price-shim
     extends:
       file: ./services/backend.yml
       service: backend
     links:
       - db:database
     environment:
-        ETHEREUM_JSONRPC_VARIANT: 'anvil'
-        ETHEREUM_JSONRPC_WS_URL: ws://host.docker.internal:8545/
+        ETHEREUM_JSONRPC_VARIANT: 'geth'
+        ETHEREUM_JSONRPC_HTTP_URL: 'https://testnet.nagara.network'
+        ETHEREUM_JSONRPC_TRACE_URL: 'https://testnet.nagara.network'
+        ETHEREUM_JSONRPC_WS_URL: 'wss://testnet.nagara.network'
+        CHAIN_ID: '16869'
         INDEXER_DISABLE_INTERNAL_TRANSACTIONS_FETCHER: 'true'
-        INDEXER_DISABLE_PENDING_TRANSACTIONS_FETCHER: 'true'
-        CHAIN_ID: '31337'
         DATABASE_URL: 'postgresql://blockscout:blockscout@db:5432/blockscout?ssl=false'
-        ECTO_SSL_MODE: 'disable'
+        ECTO_USE_SSL: 'false'
+        MARKET_NATIVE_COIN_SOURCE: 'coin_gecko'
+        MARKET_TOKENS_SOURCE: 'coin_gecko'
+        MARKET_NATIVE_COIN_HISTORY_SOURCE: 'crypto_compare'
+        MARKET_COINGECKO_BASE_URL: 'http://price-shim:3006/cg'
+        MARKET_COINGECKO_COIN_ID: 'nagara'
+        MARKET_COINGECKO_PLATFORM_ID: 'nagara'
+        MARKET_CRYPTOCOMPARE_BASE_URL: 'http://price-shim:3006'
+        MARKET_CRYPTOCOMPARE_COIN_SYMBOL: 'tNGRX'
 
   visualizer:
     extends:
@@ -50,14 +73,17 @@ services:
       service: sig-provider
 
   frontend:
+    image: blockscout-frontend:nagara-rp
     depends_on:
       - backend
     extends:
       file: ./services/frontend.yml
       service: frontend
+    env_file:
+      - ../../envs/nagara-frontend.env
     environment:
-      NEXT_PUBLIC_NETWORK_ID: '31337'
-      NEXT_PUBLIC_NETWORK_RPC_URL: http://host.docker.internal:8545/
+      NEXT_PUBLIC_NETWORK_ID: '16869'
+      NEXT_PUBLIC_NETWORK_RPC_URL: 'https://testnet.nagara.network'
 
   stats-db-init:
     extends:
@@ -73,6 +99,8 @@ services:
       service: stats-db
     environment:
       POSTGRES_PASSWORD: 'blockscout'
+      POSTGRES_USER: 'blockscout'
+      POSTGRES_DB: 'blockscout'
 
   stats:
     depends_on:
@@ -81,6 +109,11 @@ services:
     extends:
       file: ./services/stats.yml
       service: stats
+    volumes:
+      - ../../envs/stats-charts.json:/app/config/blockscout_instance/charts.json:ro
+    environment:
+      STATS__DB_URL: 'postgres://blockscout:blockscout@stats-db:5432/blockscout'
+      STATS__BLOCKSCOUT_DB_URL: 'postgresql://blockscout:blockscout@db:5432/blockscout'
 
   user-ops-indexer:
     depends_on:
